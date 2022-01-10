@@ -108,7 +108,6 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 		msg := RequestVoice{
 			Recipient: RecipientVoice{
 				Include: n.conf.Recipient,
-				Exclude: n.conf.RecipientExclude,
 			},
 			Type: n.conf.NotificationType,
 			Payload: RequestPayload{
