@@ -457,6 +457,8 @@ type SigmaConfig struct {
 	URL              *URL     `yaml:"url" json:"url"`
 	APIKey           Secret   `yaml:"api_key" json:"api_key"`
 	Recipient        []string `yaml:"recipient" json:"recipient"`
+	RecipientInclude []string `yaml:"recipient_include" json:"recipient_include"`
+	RecipientExclude []string `yaml:"recipient_exclude" json:"recipient_exclude"`
 	NotificationType string   `yaml:"notification_type" json:"notification_type"`
 	SenderName       string   `yaml:"sender_name" json:"sender_name"`
 	Text             string   `yaml:"text" json:"text"`
@@ -477,8 +479,13 @@ func (c *SigmaConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if c.APIKey == "" {
 		return fmt.Errorf("api_key must be configured")
 	}
-	if c.NotificationType == "" {
+	switch strings.ToLower(c.NotificationType) {
+	case "sms", "":
 		c.NotificationType = "sms"
+	case "voice":
+		c.NotificationType = "voice"
+	default:
+		return fmt.Errorf("unknown notification type: %s", c.NotificationType)
 	}
 	if c.TTS == "" {
 		c.TTS = "yandex:alena"
