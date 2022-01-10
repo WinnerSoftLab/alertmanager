@@ -15,12 +15,15 @@ package slackV2
 
 import (
 	"context"
+	"fmt"
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/notify"
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
 	"github.com/slack-go/slack"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,12 +40,14 @@ type Notifier struct {
 
 type Data struct {
 	*template.Data
+	SendAt time.Time
 }
 
 // New returns a new Slack notification handler.
 func New(c *config.SlackConfigV2, t *template.Template, l log.Logger) (*Notifier, error) {
 	token := c.Token
-	client := slack.New(token)
+	client := slack.New(token, slack.OptionDebug(c.Debug))
+
 	notifier := &Notifier{
 		conf:    c,
 		tmpl:    t,
@@ -58,29 +63,58 @@ func New(c *config.SlackConfigV2, t *template.Template, l log.Logger) (*Notifier
 func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error) {
 	data := notify.GetTemplateData(ctx, n.tmpl, as, n.logger)
 
+	if n.conf.Debug {
+		level.Debug(n.logger).Log("Alert Data", data)
+	}
+
 	changedMessages := make([]string, 0)
+	notifyMessages := make([]string, 0)
 	for _, newAlert := range data.Alerts {
 		messages := n.getMessagesByFingerprint(newAlert.Fingerprint)
 		changedMessages = append(changedMessages, messages...)
 		if len(messages) > 0 {
 			n.mu.Lock()
 			for _, ts := range messages {
+				changed := false
 				for i := range n.storage[ts].Alerts {
 					if n.storage[ts].Alerts[i].Fingerprint == newAlert.Fingerprint {
-						n.storage[ts].Alerts[i].Status = newAlert.Status
+						if n.storage[ts].Alerts[i].Status != newAlert.Status {
+							n.storage[ts].Alerts[i].Status = newAlert.Status
+							changed = true
+						}
 						n.storage[ts].Alerts[i].EndsAt = newAlert.EndsAt
+						n.storage[ts].Data.CommonAnnotations = data.CommonAnnotations
+
 					}
+				}
+				if !changed {
+					notifyMessages = append(notifyMessages, ts)
 				}
 			}
 			n.mu.Unlock()
 		} else {
-			ts, err := n.send(data, "", false)
-			if err != nil {
-				return false, err
+			// Делаем проверку, что бы не отправлять резолвы на "осиратевшие алерты", у которых 0 firing
+			if len(data.Alerts.Firing()) > 0 {
+				ts, err := n.send(data, "")
+				if err != nil {
+					return false, err
+				}
+				n.mu.Lock()
+				n.storage[ts] = Data{Data: data}
+				n.mu.Unlock()
+				notifyMessages = append(notifyMessages, ts)
 			}
-			n.mu.Lock()
-			n.storage[ts] = Data{Data: data}
-			n.mu.Unlock()
+		}
+
+		for _, ts := range UniqStr(notifyMessages) {
+			if n.storage[ts].SendAt.IsZero() || n.storage[ts].SendAt.Add(time.Duration(n.conf.MentionDelay)).Before(time.Now()) {
+				if err := n.sendNotify(ts); err != nil {
+					return false, err
+				}
+				n.mu.Lock()
+				n.storage[ts] = Data{Data: n.storage[ts].Data, SendAt: time.Now()}
+				n.mu.Unlock()
+			}
 		}
 	}
 
@@ -88,7 +122,7 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 	defer n.mu.RUnlock()
 
 	for _, msg := range changedMessages {
-		_, err := n.send(n.storage[msg].Data, msg, false)
+		_, err := n.send(n.storage[msg].Data, msg)
 		if err != nil {
 			return false, err
 		}
@@ -97,41 +131,18 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 	return true, nil
 }
 
-func (n *Notifier) send(data *template.Data, ts string, here bool) (string, error) {
-	var (
-		err      error
-		tmplText = notify.TmplText(n.tmpl, data, &err)
-	)
+func (n *Notifier) send(data *template.Data, ts string) (string, error) {
 
-	attachmets := &slack.Attachment{
-		TitleLink: tmplText(n.conf.TitleLink),
-		Text:      tmplText(n.conf.Text),
-		ImageURL:  tmplText(n.conf.ImageURL),
-		Footer:    tmplText(n.conf.Footer),
-		Color:     n.conf.Color,
-	}
-
-	attachmets.Actions = make([]slack.AttachmentAction, len(n.conf.Actions))
-	for i, action := range n.conf.Actions {
-		attachmets.Actions[i] = slack.AttachmentAction{
-			Type:  slack.ActionType(action.Type),
-			Text:  tmplText(action.Text),
-			URL:   tmplText(action.URL),
-			Style: tmplText(action.Style),
-			Name:  action.Name,
-			Value: tmplText(action.Value),
-		}
+	attachment := slack.Attachment{
+		Color:  n.conf.Color,
+		Blocks: n.formatMessage(data),
 	}
 
 	if len(data.Alerts.Firing()) == 0 {
-		attachmets.Color = "good"
+		attachment.Color = "#1aad21"
 	}
 
-	if ts != "" && here == true {
-		attachmets.Pretext = "<!here>"
-	}
-
-	att := slack.MsgOptionAttachments(*attachmets)
+	att := slack.MsgOptionAttachments(attachment)
 
 	if ts != "" {
 		_, _, messageTs, err := n.client.UpdateMessage(n.conf.Channel, ts, att)
@@ -140,6 +151,30 @@ func (n *Notifier) send(data *template.Data, ts string, here bool) (string, erro
 		_, messageTs, err := n.client.PostMessage(n.conf.Channel, att)
 		return messageTs, err
 	}
+}
+
+func (n *Notifier) sendNotify(ts string) error {
+	if len(n.conf.Mentions) == 0 {
+		return nil
+	}
+	users := make([]string, len(n.conf.Mentions))
+	for i, val := range n.conf.Mentions {
+		switch strings.ToLower(val.Type) {
+		case "group":
+			users[i] = fmt.Sprintf("<!subteam^%s|@%s>", val.ID, val.Name)
+		case "user":
+			users[i] = fmt.Sprintf("<@%s>", val.ID)
+		}
+	}
+
+	text := fmt.Sprintf("Look here %s", strings.Join(users, " "))
+	opts := make([]slack.MsgOption, 0)
+	opts = append(opts, slack.MsgOptionTS(ts))
+	opts = append(opts, slack.MsgOptionText(text, false))
+	//
+	_, _, err := n.client.PostMessage(n.conf.Channel, opts...)
+	return err
+
 }
 
 func (n *Notifier) getMessagesByFingerprint(fp string) []string {
