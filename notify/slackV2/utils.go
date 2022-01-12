@@ -1,6 +1,11 @@
 package slackV2
 
-import "github.com/prometheus/alertmanager/template"
+import (
+	"github.com/prometheus/alertmanager/template"
+	"unicode/utf8"
+)
+
+const SummaryMessageDiffThreshold = 3
 
 func UniqStr(input []string) []string {
 	u := make([]string, 0, len(input))
@@ -23,7 +28,15 @@ func getMapValue(data template.KV, key string) string {
 	}
 }
 
-func distance(s1, s2 string) int {
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return utf8.RuneCountInString(s2)
+	} else if len(s2) == 0 {
+		return utf8.RuneCountInString(s1)
+	} else if s1 == s2 {
+		return 0
+	}
+
 	min := func(values ...int) int {
 		m := values[0]
 		for _, v := range values {
@@ -63,16 +76,21 @@ func distance(s1, s2 string) int {
 	return currentRow[n]
 }
 
-func distanceResult(arr []string) []string {
+func mergeSameMessages(arr []string) []string {
 	result := make([]string, 0)
-	result = append(result, arr[0])
+	if len(arr) > 0 {
+		result = append(result, arr[0])
+	}
 
-	for i := 0; i < len(arr); i++ {
-		for key, value := range arr {
-			d := distance(arr[i], arr[key])
-			if d >= 3 {
-				result = append(result, value)
+	for _, val := range arr {
+		differs := 0
+		for _, res := range result {
+			if levenshteinDistance(val, res) > SummaryMessageDiffThreshold {
+				differs++
 			}
+		}
+		if differs == len(result) {
+			result = append(result, val)
 		}
 	}
 
