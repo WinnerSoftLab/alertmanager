@@ -135,7 +135,7 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 			}
 			summary = mergeSameMessages(summary)
 			if len(summary) > 0 {
-				block.Elements = append(block.Elements, &Element{Type: slack.MarkdownType, Text: fmt.Sprintf("*Summary:* %s", strings.Join(summary, ";\n"))})
+				block.Elements = append(block.Elements, &Element{Type: slack.MarkdownType, Text: fmt.Sprintf("*Summary:* %s", cut(strings.Join(summary, ";\n"), 500))})
 			}
 		}
 
