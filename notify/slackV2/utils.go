@@ -63,23 +63,18 @@ func distance(s1, s2 string) int {
 	return currentRow[n]
 }
 
-func distanceResult (arr []string) []string{
+func distanceResult(arr []string) []string {
 	result := make([]string, 0)
+	result = append(result, arr[0])
 
-	for k := 0; k < len(arr); k++{
-
-		if k == 0 {
-			result=append(result, arr[0])
-		}
-
-		for i, j := range arr{
-				d:=distance(arr[k], arr[i])
-				if d >= 2 {
-					result=append(result, j)
-				}
+	for i := 0; i < len(arr); i++ {
+		for key, value := range arr {
+			d := distance(arr[i], arr[key])
+			if d >= 3 {
+				result = append(result, value)
 			}
 		}
-
+	}
 
 	result = UniqStr(result)
 	return result
