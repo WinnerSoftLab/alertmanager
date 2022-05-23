@@ -9,6 +9,7 @@ import (
 	"github.com/slack-go/slack"
 	"net/http"
 	url2 "net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -34,8 +35,8 @@ func genGrafanaRenderUrl(grafanaUrl string, grafanaTZ string, org string, dash s
 	u.Path = path.Join(u.Path, urlPath, dash)
 	q := u.Query()
 	q.Set("orgId", org)
-	q.Set("from", strconv.Itoa(int(time.Now().Add(fromShift).Unix())))
-	q.Set("to", strconv.Itoa(int(time.Now().Add(toShift).Unix())))
+	q.Set("from", strconv.Itoa(int(time.Now().Add(fromShift).UnixMilli())))
+	q.Set("to", strconv.Itoa(int(time.Now().Add(toShift).UnixMilli())))
 	q.Set("panelId", panel)
 	q.Set("width", imageWidth)
 	q.Set("height", imageHeight)
@@ -87,6 +88,7 @@ func urlMerger(publicUrl string, privateUrl string) (string, error) {
 }
 
 func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Secret) (string, error) {
+	const imageExtension = "jpg"
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -98,23 +100,18 @@ func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Se
 	if err != nil {
 		return "", err
 	}
-
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("request status code %d != %d", response.StatusCode, http.StatusOK)
 	}
 
-	uuid, err := uuid.NewV4()
-	if err != nil {
-		return "", err
-	}
-	fileName := strings.Replace(uuid.String(), "-", "", -1)
+	fileName := fmt.Sprintf("%s.%s", strings.Replace(uuid.NewV4().String(), "-", "", -1), imageExtension)
 	api := slack.New(string(token))
 	params := slack.FileUploadParameters{
 		Reader:   response.Body,
 		Filetype: "jpg",
-		Filename: fileName + ".jpg",
+		Filename: fileName,
 	}
 
 	image, err := api.UploadFile(params)
@@ -137,7 +134,6 @@ func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Se
 }
 
 func (n *Notifier) formatGrafanaMessage(data *template.Data) slack.Blocks {
-
 	dashboardUid := ""
 	panelId := ""
 	orgId := ""
@@ -167,7 +163,6 @@ func (n *Notifier) formatGrafanaMessage(data *template.Data) slack.Blocks {
 		}
 		for _, v := range alert.Annotations.SortedPairs() {
 			switch v.Name {
-
 			case "__dashboardUid__":
 				dashboardUid = v.Value
 			case "__panelId__":
