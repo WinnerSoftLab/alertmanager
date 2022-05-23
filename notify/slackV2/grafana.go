@@ -2,14 +2,13 @@ package slackV2
 
 import (
 	"fmt"
-	"github.com/gofrs/uuid"
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/common/model"
+	"github.com/satori/go.uuid"
 	"github.com/slack-go/slack"
 	"net/http"
 	url2 "net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
