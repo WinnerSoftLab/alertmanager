@@ -7,6 +7,8 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/satori/go.uuid"
 	"github.com/slack-go/slack"
+	"golang.org/x/net/html"
+	"io"
 	"net/http"
 	url2 "net/url"
 	"path"
@@ -15,10 +17,44 @@ import (
 	"time"
 )
 
+func extract(resp io.Reader) string {
+	z := html.NewTokenizer(resp)
+
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			return ""
+		case html.StartTagToken, html.SelfClosingTagToken:
+			t := z.Token()
+			if t.Data == "meta" {
+				Image, ok := extractMetaProperty(t, "og:image")
+				if ok {
+					return Image
+				}
+			}
+		}
+	}
+}
+
+func extractMetaProperty(t html.Token, prop string) (content string, ok bool) {
+	for _, attr := range t.Attr {
+		if attr.Key == "property" && attr.Val == prop {
+			ok = true
+		}
+
+		if attr.Key == "content" {
+			content = attr.Val
+		}
+	}
+
+	return
+}
+
 func genGrafanaRenderUrl(grafanaUrl string, grafanaTZ string, org string, dash string, panel string) (string, error) {
 
 	const fromShift = -time.Hour
-	const toShift = -time.Second * 10
+	const toShift = -time.Second
 	const imageWidth = "999"
 	const imageHeight = "333"
 	const urlPath = "/render/d-solo/"
@@ -67,49 +103,29 @@ func genGrafanaUrl(grafanaUrl string, org string, dash string, panel string) (st
 	return u.String(), nil
 }
 
-func urlMerger(publicUrl string, privateUrl string) (string, error) {
-	u, err := url2.Parse(publicUrl)
-	if err != nil {
-		return "", err
-	}
-
-	trunc := []rune(u.Path)
-	key := string(trunc[len(trunc)-10:])
-
-	u, err = url2.Parse(privateUrl)
-	if err != nil {
-		return "", err
-	}
-	q := u.Query()
-	q.Set("pub_secret", key)
-	u.RawQuery = q.Encode()
-
-	return u.String(), nil
-}
-
 func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Secret) (string, error) {
 	const imageExtension = "jpg"
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	grafanaRequest, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+string(grafanaToken))
+	grafanaRequest.Header.Set("Authorization", "Bearer "+string(grafanaToken))
 
-	response, err := client.Do(req)
+	grafanaResponse, err := client.Do(grafanaRequest)
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer grafanaResponse.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("request status code %d != %d", response.StatusCode, http.StatusOK)
+	if grafanaResponse.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request status code %d != %d", grafanaResponse.StatusCode, http.StatusOK)
 	}
 
 	fileName := fmt.Sprintf("%s.%s", strings.Replace(uuid.NewV4().String(), "-", "", -1), imageExtension)
 	api := slack.New(string(token))
 	params := slack.FileUploadParameters{
-		Reader:   response.Body,
+		Reader:   grafanaResponse.Body,
 		Filetype: "jpg",
 		Filename: fileName,
 	}
@@ -124,12 +140,17 @@ func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Se
 		return "", fmt.Errorf("share error: %w", err)
 	}
 
-	imageUrl, err := urlMerger(sharedUrl.PermalinkPublic, sharedUrl.URLPrivate)
+	slackRequest, err := http.NewRequest("GET", sharedUrl.PermalinkPublic, nil)
 	if err != nil {
-		return "", fmt.Errorf("url merge error: %w", err)
+		return "", fmt.Errorf("SlackRequestError: %w", err)
 	}
-
-	return imageUrl, nil
+	slackResponse, err := client.Do(slackRequest)
+	if err != nil || slackResponse.StatusCode != http.StatusOK {
+		fmt.Printf("err %v\ncode: %v", err, slackResponse.StatusCode)
+	}
+	defer slackResponse.Body.Close()
+	htmlData := extract(slackResponse.Body)
+	return htmlData, nil
 
 }
 
