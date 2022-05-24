@@ -145,12 +145,14 @@ func getUploadedImageUrl(url string, token config.Secret, grafanaToken config.Se
 		return "", fmt.Errorf("SlackRequestError: %w", err)
 	}
 	slackResponse, err := client.Do(slackRequest)
-	if err != nil || slackResponse.StatusCode != http.StatusOK {
-		fmt.Printf("err %v\ncode: %v", err, slackResponse.StatusCode)
+	if err != nil {
+		fmt.Errorf("err %w", err)
+	}
+	if slackResponse.StatusCode != http.StatusOK {
+		fmt.Printf("StatusCode: %v", slackResponse.StatusCode)
 	}
 	defer slackResponse.Body.Close()
-	htmlData := extract(slackResponse.Body)
-	return htmlData, nil
+	return extract(slackResponse.Body), nil
 
 }
 
