@@ -45,6 +45,8 @@ var (
 		NotifierConfig: NotifierConfig{
 			VSendResolved: true,
 		},
+		Threshold: 100,
+		DefaultWeight: 100,
 	}
 
 	// DefaultEmailConfig defines default values for Email configurations.
@@ -523,6 +525,8 @@ type TwilioConfig struct {
 	Recipient        []string                    `yaml:"recipient" json:"recipient"`
 	NotificationType string                      `yaml:"notification_type" json:"notification_type"`
 	SenderName       string                      `yaml:"sender_name" json:"sender_name"`
+	Threshold        int                         `yaml:"threshold" json:"threshold"`
+	DefaultWeight    int                         `yaml:"default_weight" json:"default_weight"`
 	Text             string                      `yaml:"text" json:"text"`
 }
 

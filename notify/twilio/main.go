@@ -18,28 +18,36 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"strconv"
+	"sync"
+
 	"github.com/go-kit/log"
+	"github.com/prometheus/common/model"
+	"github.com/twilio/twilio-go"
+	twapi "github.com/twilio/twilio-go/rest/api/v2010"
+
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/notify"
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
-	"github.com/twilio/twilio-go"
-	twapi "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
 // Notifier implements a Notifier for generic sigma.
 type Notifier struct {
-	conf   *config.TwilioConfig
-	tmpl   *template.Template
-	logger log.Logger
+	conf    *config.TwilioConfig
+	tmpl    *template.Template
+	logger  log.Logger
+	mu      sync.Mutex
+	history map[model.Fingerprint]int
 }
 
 // New returns a new Sigma.
 func New(conf *config.TwilioConfig, t *template.Template, l log.Logger) (*Notifier, error) {
 	return &Notifier{
-		conf:   conf,
-		tmpl:   t,
-		logger: l,
+		conf:    conf,
+		tmpl:    t,
+		logger:  l,
+		history: make(map[model.Fingerprint]int),
 	}, nil
 }
 
@@ -54,6 +62,43 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 		Username: n.conf.AccountID,
 		Password: string(n.conf.Token),
 	})
+
+	n.mu.Lock()
+	for _, a := range as {
+		w := n.conf.DefaultWeight
+		if _, ok := a.Labels["weight"]; ok {
+			if i, err := strconv.Atoi(string(a.Labels["weight"])); err == nil {
+				w = i
+			}
+		}
+
+		if a.EndsAt.IsZero() {
+			if v, ok := n.history[a.Fingerprint()]; !ok {
+				n.history[a.Fingerprint()] = w
+			} else {
+				n.history[a.Fingerprint()] = max(v, w)
+			}
+		} else {
+			if _, ok := n.history[a.Fingerprint()]; ok {
+				n.history[a.Fingerprint()] = 0
+			}
+		}
+	}
+
+	totalWeight := 0
+	for k, v := range n.history {
+		if v > 0 {
+			totalWeight += v
+		} else {
+			delete(n.history, k)
+		}
+	}
+	n.mu.Unlock()
+
+	n.logger.Log("current alerts weight", totalWeight, "target", n.conf.Threshold)
+	if totalWeight < n.conf.Threshold {
+		return false, nil
+	}
 
 	allErrors := make([]error, 0)
 	switch n.conf.NotificationType {
