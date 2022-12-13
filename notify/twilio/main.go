@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/common/model"
@@ -38,7 +39,12 @@ type Notifier struct {
 	tmpl    *template.Template
 	logger  log.Logger
 	mu      sync.Mutex
-	history map[model.Fingerprint]int
+	history map[model.Fingerprint]*History
+}
+
+type History struct {
+	Time  time.Time
+	Value int
 }
 
 // New returns a new Sigma.
@@ -47,7 +53,7 @@ func New(conf *config.TwilioConfig, t *template.Template, l log.Logger) (*Notifi
 		conf:    conf,
 		tmpl:    t,
 		logger:  l,
-		history: make(map[model.Fingerprint]int),
+		history: make(map[model.Fingerprint]*History),
 	}, nil
 }
 
@@ -74,23 +80,24 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 
 		if a.EndsAt.IsZero() {
 			if v, ok := n.history[a.Fingerprint()]; !ok {
-				n.history[a.Fingerprint()] = w
+				n.history[a.Fingerprint()] = &History{Value: w, Time: time.Now()}
 			} else {
-				n.history[a.Fingerprint()] = max(v, w)
+				n.history[a.Fingerprint()] = &History{Value: max(v.Value, w), Time: time.Now()}
+
 			}
 		} else {
 			if _, ok := n.history[a.Fingerprint()]; ok {
-				n.history[a.Fingerprint()] = 0
+				n.history[a.Fingerprint()].Value = 0
 			}
 		}
 	}
 
 	totalWeight := 0
 	for k, v := range n.history {
-		if v > 0 {
-			totalWeight += v
-		} else {
+		if v.Time.Add(time.Hour*2).Before(time.Now()) || v.Value <= 0 {
 			delete(n.history, k)
+		} else {
+			totalWeight += v.Value
 		}
 	}
 	n.mu.Unlock()
