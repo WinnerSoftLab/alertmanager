@@ -86,6 +86,10 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 
 		graphUrl := ""
 		for _, alert := range data.Alerts {
+			if link, ok := alert.Annotations["graph_link"]; ok {
+				graphUrl = link
+				break
+			}
 			if alert.GeneratorURL != "" {
 				graphUrl = alert.GeneratorURL
 				break
