@@ -1,8 +1,8 @@
 # Build image
-FROM nexus.adsrv.wtf/click/golang:1.18.3-202206230758 as build
+FROM nexus.adsrv.wtf/click/golang:1.21.1-202309200830 as build
 
 WORKDIR /app
-COPY ./ ./
+COPY --chown=1000:1000 ./ ./
 RUN make build
 
 # Main image
