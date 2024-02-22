@@ -2,7 +2,7 @@
 FROM nexus.adsrv.wtf/click/golang:1.21.1-202309200830 as build
 
 WORKDIR /app
-COPY --chown=1000:1000 ./ ./
+COPY --chown=10000:10000 ./ ./
 RUN make build
 
 # Main image
