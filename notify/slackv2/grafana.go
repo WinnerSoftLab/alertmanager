@@ -2,21 +2,18 @@ package slackv2
 
 import (
 	"fmt"
+	"github.com/prometheus/alertmanager/blobstore"
+	"github.com/prometheus/alertmanager/template"
+	"github.com/prometheus/common/model"
+	uuid "github.com/satori/go.uuid"
+	"github.com/slack-go/slack"
 	"io"
 	"net/http"
 	url2 "net/url"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/prometheus/common/model"
-	"github.com/satori/go.uuid"
-	"github.com/slack-go/slack"
-
-	"github.com/prometheus/alertmanager/blobstore"
-	"github.com/prometheus/alertmanager/template"
 )
 
 func (n *Notifier) getGrafanaImage(org string, dash string, panel string) ([]byte, error) {
@@ -105,9 +102,9 @@ func (n *Notifier) formatGrafanaMessage(data *template.Data) slack.Blocks {
 				dashboardUid = v.Value
 			case strings.ToLower("__panelId__"):
 				panelId = v.Value
-			case strings.ToLower("OrgID"):
+			case strings.ToLower("__orgId__"):
 				orgId = v.Value
-			case strings.ToLower("__value_string__"):
+			case strings.ToLower("__values__"):
 				grafanaValues = v.Value
 			case strings.ToLower("runbook_url"):
 				runBook = v.Value
@@ -217,20 +214,7 @@ func (n *Notifier) formatGrafanaMessage(data *template.Data) slack.Blocks {
 		block := Block{Type: slack.MBTContext, Elements: make([]*Element, 0)}
 
 		if (grafanaValues != "[no value]") || (grafanaValues != "") {
-			regexpForParseMetric := regexp.MustCompile(`(?m) labels={[a-zA-z0-9=:,_@{ -.]+} value=`)
-			valueStringCollection := regexpForParseMetric.ReplaceAllString(grafanaValues, ", value=")
-			regexpForParseParams := regexp.MustCompile(`(?m)metric='(?P<name>.*)', value=(?P<value>.*)`)
-
-			grafanaMapParams := make(map[string]string)
-			for _, parsedCollection := range strings.Split(valueStringCollection, "], [ ") {
-				match := regexpForParseParams.FindStringSubmatch(parsedCollection)
-				if len(match) >= 3 {
-					grafanaMapParams[match[1]] = match[2]
-				}
-			}
-			if valueStringCollection != "" {
-				block.Elements = append(block.Elements, &Element{Type: slack.MarkdownType, Text: fmt.Sprintf("*Metric:* %s\n", valueStringCollection)})
-			}
+			block.Elements = append(block.Elements, &Element{Type: slack.MarkdownType, Text: fmt.Sprintf("*Metric:* %s\n", grafanaValues)})
 		}
 
 		if val := getMapValue(data.CommonAnnotations, "description"); len(val) > 0 {
