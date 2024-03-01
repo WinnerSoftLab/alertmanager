@@ -2,6 +2,7 @@ const styles = {
     "env": {
         "prod": {"background-color": "#608cff", "color": "#000000"},
         "stage": {"background-color": "#b3b3b3", "color": "#000000"},
+        "services": {"background-color": "#b3b3b3", "color": "#1ffffb"},
     },
     "severity": {
         "critical": {"background-color": "#ff5261", "color": "#000000"},
