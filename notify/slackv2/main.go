@@ -110,7 +110,7 @@ func (n *Notifier) Notify(ctx context.Context, as ...*types.Alert) (bool, error)
 
 		for _, ts := range UniqStr(notifyMessages) {
 			if n.storage[ts].SendAt.IsZero() || n.storage[ts].SendAt.Add(time.Duration(n.conf.MentionDelay)).Before(time.Now()) {
-				if err := n.sendNotify(ts); err != nil {
+				if err := n.sendNotify(ts, n.storage[ts].Data); err != nil {
 					return false, err
 				}
 				n.mu.Lock()
@@ -165,7 +165,7 @@ func (n *Notifier) send(data *template.Data, ts string) (string, error) {
 	}
 }
 
-func (n *Notifier) sendNotify(ts string) error {
+func (n *Notifier) sendNotify(ts string, data *template.Data) error {
 	if len(n.conf.Mentions) == 0 {
 		return nil
 	}
@@ -179,11 +179,26 @@ func (n *Notifier) sendNotify(ts string) error {
 		}
 	}
 
-	text := fmt.Sprintf("Look here %s", strings.Join(users, " "))
+	severity := make([]string, 0)
+	for _, alert := range data.Alerts {
+		for _, v := range alert.Labels.SortedPairs() {
+			switch v.Name {
+			case "severity":
+				severity = append(severity, v.Value)
+			}
+		}
+	}
+
+	name := getMapValue(data.CommonLabels, "alertname")
+
+	text := fmt.Sprintf("Alert %s (%s) on %s\n%s, ", name,
+		strings.Join(UniqStr(severity), ", "),
+		strings.Join(users, " "),
+	)
 	opts := make([]slack.MsgOption, 0)
 	opts = append(opts, slack.MsgOptionTS(ts))
 	opts = append(opts, slack.MsgOptionText(text, false))
-	//
+
 	_, _, err := n.client.PostMessage(n.conf.Channel, opts...)
 	return err
 
