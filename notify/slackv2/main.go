@@ -191,7 +191,7 @@ func (n *Notifier) sendNotify(ts string, data *template.Data) error {
 
 	name := getMapValue(data.CommonLabels, "alertname")
 
-	text := fmt.Sprintf("Alert %s (%s) on %s\n%s, ", name,
+	text := fmt.Sprintf("Alert %s (%s)\n%s, ", name,
 		strings.Join(UniqStr(severity), ", "),
 		strings.Join(users, " "),
 	)
