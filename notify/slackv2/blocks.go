@@ -12,8 +12,10 @@ import (
 )
 
 type Text struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Emoji    bool   `json:"emoji,omitempty"`
+	Verbatim bool   `json:"verbatim,omitempty"`
 }
 type Element struct {
 	Type string `json:"type"`
@@ -24,13 +26,22 @@ type Field struct {
 	Text string `json:"text"`
 }
 
+type Accessory struct {
+	Type     slack.MessageElementType `json:"type"`
+	Text     *Text                    `json:"text"`
+	Value    string                   `json:"value,omitempty"`
+	URL      string                   `json:"url"`
+	ActionID string                   `json:"action_id,omitempty"`
+}
+
 type Block struct {
-	Type     slack.MessageBlockType `json:"type"`
-	Text     *Text                  `json:"text,omitempty"`
-	Fields   []*Field               `json:"fields,omitempty"`
-	Elements []*Element             `json:"elements,omitempty"`
-	ImageURL string                 `json:"image_url,omitempty"`
-	AltText  string                 `json:"alt_text,omitempty"`
+	Type      slack.MessageBlockType `json:"type"`
+	Text      *Text                  `json:"text,omitempty"`
+	Fields    []*Field               `json:"fields,omitempty"`
+	Elements  []*Element             `json:"elements,omitempty"`
+	ImageURL  string                 `json:"image_url,omitempty"`
+	AltText   string                 `json:"alt_text,omitempty"`
+	Accessory *Accessory             `json:"accessory,omitempty"`
 }
 
 func (b Block) BlockType() slack.MessageBlockType {
@@ -69,6 +80,7 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 	envs = UniqStr(envs)
 
 	blocks = append(blocks, Block{Type: slack.MBTHeader, Text: &Text{Type: slack.PlainTextType, Text: getMapValue(data.CommonLabels, "alertname")}})
+	// Divider
 	blocks = append(blocks, Block{Type: slack.MBTDivider})
 
 	{
@@ -111,7 +123,9 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 		} else {
 			fields = append(fields, &Field{Type: slack.MarkdownType, Text: fmt.Sprintf("*:no_bell:~Silence~")})
 		}
-
+		if val := getMapValue(data.CommonAnnotations, "log_link"); len(val) > 0 {
+			fields = append(fields, &Field{Type: slack.MarkdownType, Text: fmt.Sprintf("*<%s|:scroll:Logs>*", val)})
+		}
 		blocks = append(blocks, Block{Type: slack.MBTSection, Fields: fields})
 	}
 
@@ -132,7 +146,6 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 
 	{
 		block := Block{Type: slack.MBTContext, Elements: make([]*Element, 0)}
-
 		if val := getMapValue(data.CommonAnnotations, "summary"); len(val) > 0 {
 			block.Elements = append(block.Elements, &Element{Type: slack.MarkdownType, Text: fmt.Sprintf("*Summary:* %s", val)})
 		} else {
@@ -158,13 +171,11 @@ func (n *Notifier) formatMessage(data *template.Data) slack.Blocks {
 				}
 			}
 		}
-
 		if len(block.Elements) > 0 {
 			blocks = append(blocks, block)
 		}
 	}
 
 	result := slack.Blocks{BlockSet: blocks}
-
 	return result
 }
